@@ -275,3 +275,6 @@ def _show_dry_run_plan(
             console.print(f"  • {reg.display_name} (Tier {reg.tier})")
 
     print_info("Dry run complete. Use without --dry-run to execute.")
+
+
+# Note: aiqe serve command is in cli/main.py
