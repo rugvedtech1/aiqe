@@ -1,0 +1,90 @@
+# AIQE Quality Engineering — Example GitHub Actions Workflow
+# Copy this file to your repository's .github/workflows/ directory.
+# See https://github.com/rugvedtech1/aiqe for documentation.
+
+name: AIQE Quality Scan
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+  # Allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      fail-on-severity:
+        description: 'Minimum severity to fail the check'
+        required: false
+        default: 'High'
+        type: choice
+        options:
+          - Critical
+          - High
+          - Medium
+          - Low
+          - never
+
+permissions:
+  pull-requests: write   # For posting PR comments
+  contents: read         # For reading repository content
+  checks: write          # For creating check runs
+
+jobs:
+  quality-scan:
+    name: AI Quality Engineering
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Full history for accurate diff
+
+      - name: Run AIQE Quality Scan
+        id: aiqe
+        uses: rugvedtech1/aiqe@v0.1.0
+        with:
+          # Provide at least one AI provider API key
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          # anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+
+          # GitHub token for PR comments (auto-provided)
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Scan configuration
+          project-path: '.'
+          fail-on-severity: ${{ inputs.fail-on-severity || 'High' }}
+          post-pr-comment: 'true'
+          enable-security-testing: 'true'
+          enable-performance-testing: 'false'
+          log-level: 'INFO'
+          report-format: 'markdown'
+
+      # Display AIQE outputs in the job summary
+      - name: Write Job Summary
+        if: always()
+        run: |
+          echo "## AIQE Quality Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.aiqe.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bugs Found | ${{ steps.aiqe.outputs.bugs-found }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical Bugs | ${{ steps.aiqe.outputs.critical-bugs }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release Risk | ${{ steps.aiqe.outputs.release-risk }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Safe to Merge | ${{ steps.aiqe.outputs.is-safe-to-merge }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow ID | ${{ steps.aiqe.outputs.workflow-id }} |" >> $GITHUB_STEP_SUMMARY
+
+      # Optional: Create a GitHub Check Run annotation for failures
+      - name: Annotate Critical Bugs
+        if: steps.aiqe.outputs.critical-bugs != '0'
+        run: |
+          echo "::error::AIQE found ${{ steps.aiqe.outputs.critical-bugs }} \
+          Critical severity issue(s). Review the AIQE quality report before merging."

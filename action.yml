@@ -1,0 +1,194 @@
+# AIQE GitHub Action
+# Automatically scans Pull Requests for quality issues.
+#
+# Usage in your workflow:
+#   - uses: rugvedtech1/aiqe@v0.1.0
+#     with:
+#       openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+#
+# See docs/github-action.md for full documentation.
+
+name: 'AIQE — AI Quality Engineering'
+description: >
+  AI-powered quality engineering for your Pull Requests.
+  Automatically detects issues, generates tests, analyzes failures,
+  and provides release intelligence with a human review gate.
+author: 'AIQE Contributors'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+# ==================================================
+# INPUTS
+# ==================================================
+
+inputs:
+
+  # AI Provider — at least one must be provided
+  openai-api-key:
+    description: 'OpenAI API key for AI analysis.'
+    required: false
+    default: ''
+
+  anthropic-api-key:
+    description: 'Anthropic API key for AI analysis.'
+    required: false
+    default: ''
+
+  gemini-api-key:
+    description: 'Google Gemini API key for AI analysis.'
+    required: false
+    default: ''
+
+  groq-api-key:
+    description: 'Groq API key for AI analysis.'
+    required: false
+    default: ''
+
+  # AI Provider selection
+  ai-provider:
+    description: >
+      Which AI provider to use.
+      Options: openai, anthropic, gemini, groq, ollama.
+    required: false
+    default: 'openai'
+
+  ai-model:
+    description: >
+      Specific model to use (e.g. gpt-4o, claude-sonnet-4-6).
+      Uses provider default if not specified.
+    required: false
+    default: ''
+
+  # GitHub integration
+  github-token:
+    description: >
+      GitHub token for posting PR comments.
+      Use secrets.GITHUB_TOKEN (provided automatically).
+    required: false
+    default: ${{ github.token }}
+
+  # Scan configuration
+  project-path:
+    description: 'Path to the project to scan. Defaults to repository root.'
+    required: false
+    default: '.'
+
+  fail-on-severity:
+    description: >
+      Minimum bug severity that causes the action to fail the PR check.
+      Options: Critical, High, Medium, Low, never.
+      Default: High (fails on Critical or High severity bugs).
+    required: false
+    default: 'High'
+
+  post-pr-comment:
+    description: 'Whether to post a quality report comment on the PR.'
+    required: false
+    default: 'true'
+
+  enable-security-testing:
+    description: 'Whether to run security tests.'
+    required: false
+    default: 'true'
+
+  enable-performance-testing:
+    description: 'Whether to run performance tests.'
+    required: false
+    default: 'false'
+
+  log-level:
+    description: 'Log level: DEBUG, INFO, WARNING, ERROR.'
+    required: false
+    default: 'INFO'
+
+  # Report output
+  report-format:
+    description: 'Report format: markdown, json.'
+    required: false
+    default: 'markdown'
+
+# ==================================================
+# OUTPUTS
+# ==================================================
+
+outputs:
+
+  workflow-id:
+    description: 'The AIQE workflow ID for this scan.'
+
+  status:
+    description: 'Workflow status: completed or failed.'
+
+  bugs-found:
+    description: 'Total number of bugs found.'
+
+  critical-bugs:
+    description: 'Number of Critical severity bugs found.'
+
+  high-bugs:
+    description: 'Number of High severity bugs found.'
+
+  release-risk:
+    description: 'Release risk assessment: Safe, Low, Medium, High, Critical.'
+
+  report-path:
+    description: 'Path to the generated quality report artifact.'
+
+  is-safe-to-merge:
+    description: 'Whether AIQE recommends this PR is safe to merge (true/false).'
+
+# ==================================================
+# ACTION RUNNER
+# ==================================================
+
+runs:
+  using: 'composite'
+  steps:
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install AIQE
+      shell: bash
+      run: |
+        pip install --quiet aiqe || pip install --quiet -e ${{ github.action_path }}
+
+    - name: Run AIQE Quality Scan
+      shell: bash
+      env:
+        OPENAI_API_KEY_1: ${{ inputs.openai-api-key }}
+        ANTHROPIC_API_KEY_1: ${{ inputs.anthropic-api-key }}
+        GEMINI_API_KEY_1: ${{ inputs.gemini-api-key }}
+        GROQ_API_KEY_1: ${{ inputs.groq-api-key }}
+        AIQE_DEFAULT_PROVIDER: ${{ inputs.ai-provider }}
+        AIQE_DEFAULT_MODEL: ${{ inputs.ai-model }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AIQE_ENV: production
+        AIQE_LOG_LEVEL: ${{ inputs.log-level }}
+        AIQE_GITHUB_ACTION: 'true'
+        AIQE_PR_NUMBER: ${{ github.event.pull_request.number }}
+        AIQE_REPOSITORY: ${{ github.repository }}
+        AIQE_BRANCH: ${{ github.head_ref }}
+        AIQE_COMMIT_SHA: ${{ github.sha }}
+        AIQE_FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
+        AIQE_POST_PR_COMMENT: ${{ inputs.post-pr-comment }}
+        AIQE_REPORT_FORMAT: ${{ inputs.report-format }}
+        AIQE_ENABLE_SECURITY: ${{ inputs.enable-security-testing }}
+        AIQE_ENABLE_PERFORMANCE: ${{ inputs.enable-performance-testing }}
+      run: |
+        python -m aiqe.github.action_runner \
+          --project-path "${{ inputs.project-path }}"
+
+    - name: Upload AIQE Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: aiqe-quality-report
+        path: .aiqe/reports/
+        retention-days: 30
+        if-no-files-found: ignore
