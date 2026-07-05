@@ -7,6 +7,9 @@ Import and call register_all_agents() once at application startup.
 
 from __future__ import annotations
 
+from aiqe.agents.api_validation.agent import APIValidationAgent
+from aiqe.agents.automation_generator.agent import AutomationGeneratorAgent
+from aiqe.agents.browser_execution.agent import BrowserExecutionAgent
 from aiqe.agents.orchestrator.agent import OrchestratorAgent
 from aiqe.agents.project_analysis.agent import ProjectAnalysisAgent
 from aiqe.agents.test_case_generator.agent import TestCaseGeneratorAgent
@@ -57,7 +60,35 @@ def register_all_agents() -> None:
             description=TestCaseGeneratorAgent.DESCRIPTION,
         ),
 
-        # Tier 2-4 placeholders — implemented in Steps 16-18
+        # ==================================================
+        # TIER 2 — EXECUTION
+        # ==================================================
+        AgentRegistration(
+            name=AutomationGeneratorAgent.NAME,
+            display_name="Automation Generator Agent",
+            agent_class=AutomationGeneratorAgent,
+            tier=2,
+            dependencies=["test_case_generator", "project_analysis"],
+            description=AutomationGeneratorAgent.DESCRIPTION,
+        ),
+        AgentRegistration(
+            name=BrowserExecutionAgent.NAME,
+            display_name="Browser Execution Agent",
+            agent_class=BrowserExecutionAgent,
+            tier=2,
+            dependencies=["automation_generator"],
+            description=BrowserExecutionAgent.DESCRIPTION,
+        ),
+        AgentRegistration(
+            name=APIValidationAgent.NAME,
+            display_name="API Validation Agent",
+            agent_class=APIValidationAgent,
+            tier=2,
+            dependencies=["automation_generator", "project_analysis"],
+            description=APIValidationAgent.DESCRIPTION,
+        ),
+
+        # Tier 3-4 placeholders — Steps 17-18
     ]
 
     registered_count = 0
