@@ -10,8 +10,11 @@ from __future__ import annotations
 from aiqe.agents.api_validation.agent import APIValidationAgent
 from aiqe.agents.automation_generator.agent import AutomationGeneratorAgent
 from aiqe.agents.browser_execution.agent import BrowserExecutionAgent
+from aiqe.agents.database_validation.agent import DatabaseValidationAgent
 from aiqe.agents.orchestrator.agent import OrchestratorAgent
+from aiqe.agents.performance.agent import PerformanceAgent
 from aiqe.agents.project_analysis.agent import ProjectAnalysisAgent
+from aiqe.agents.security_testing.agent import SecurityTestingAgent
 from aiqe.agents.test_case_generator.agent import TestCaseGeneratorAgent
 from aiqe.agents.test_strategy.agent import TestStrategyAgent
 from aiqe.shared.logging import get_logger
@@ -88,7 +91,35 @@ def register_all_agents() -> None:
             description=APIValidationAgent.DESCRIPTION,
         ),
 
-        # Tier 3-4 placeholders — Steps 17-18
+        # ==================================================
+        # TIER 3 — QUALITY
+        # ==================================================
+        AgentRegistration(
+            name=SecurityTestingAgent.NAME,
+            display_name="Security Testing Agent",
+            agent_class=SecurityTestingAgent,
+            tier=3,
+            dependencies=["project_analysis", "test_case_generator"],
+            description=SecurityTestingAgent.DESCRIPTION,
+        ),
+        AgentRegistration(
+            name=PerformanceAgent.NAME,
+            display_name="Performance Agent",
+            agent_class=PerformanceAgent,
+            tier=3,
+            dependencies=["project_analysis", "api_validation"],
+            description=PerformanceAgent.DESCRIPTION,
+        ),
+        AgentRegistration(
+            name=DatabaseValidationAgent.NAME,
+            display_name="Database Validation Agent",
+            agent_class=DatabaseValidationAgent,
+            tier=3,
+            dependencies=["project_analysis"],
+            description=DatabaseValidationAgent.DESCRIPTION,
+        ),
+
+        # Tier 4 — Step 18
     ]
 
     registered_count = 0
