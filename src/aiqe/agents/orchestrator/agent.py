@@ -1,31 +1,21 @@
 """
-AIQE Orchestrator Agent.
+AIQE Orchestrator Agent — Updated for Tier 1 coordination.
 
-The Orchestrator is the top-level coordinator for AIQE workflow
-execution. It is the only agent that the Workflow Engine talks to
-directly. All other agents are called through the Orchestrator.
-
-Responsibilities:
-    - Receive the workflow context from the Engine.
-    - Build the execution plan from the Agent Registry.
-    - Delegate to the Scheduler for actual execution.
-    - Monitor progress and respond to agent failures.
-    - Collect final results and hand off to the Report Agent.
-    - Ensure the Human Review Gate is always the final step (ADR-009).
+The Orchestrator is the top-level coordinator. It now:
+    1. Builds the execution plan from the Agent Registry
+    2. Reads the GitHub event context from shared memory
+    3. Coordinates all Tier 1 agents in dependency order
+    4. Monitors progress and handles failures
+    5. Enforces the Human Review Gate (ADR-009)
 
 What the Orchestrator does NOT do:
-    - Detect languages or frameworks (Project Analysis Agent).
-    - Generate test cases (Test Case Generator Agent).
-    - Execute browser tests (Browser Execution Agent).
-    - Analyse bugs (Bug Analysis Agent).
-    - Make AI calls directly (uses AI Gateway through agents).
+    - Detect languages (Project Analysis Agent)
+    - Generate test cases (Test Case Generator)
+    - Execute tests (Browser/API agents)
+    - Analyse bugs (Bug Analysis Agent)
 
-The Orchestrator uses DETERMINISTIC logic only.
-It never calls AI itself — it is a coordinator, not an analyst.
-This follows the "deterministic before AI" principle (ADR-001).
-
-Tier: 1 (Core)
-Dependencies: None (it is the root of the dependency tree)
+This agent uses DETERMINISTIC logic only. No AI calls.
+Tier: 1 | Dependencies: none (root)
 """
 
 from __future__ import annotations
@@ -34,28 +24,16 @@ from typing import Any
 
 from aiqe.agents.base import BaseAgent
 from aiqe.agents.types import AgentInput, AgentOutput
+from aiqe.memory.schema import MemoryKeys
 from aiqe.shared.logging import get_logger
-from aiqe.workflow.context import WorkflowContext
 from aiqe.workflow.registry import agent_registry
 
 logger = get_logger(__name__)
 
 
 class OrchestratorInput(AgentInput):
-    """
-    Input for the Orchestrator Agent.
-
-    The Orchestrator receives the full workflow context reference
-    plus configuration for how to run the workflow.
-
-    Attributes:
-        context: The active WorkflowContext for this execution.
-        enable_security_testing: Whether to run security tests.
-        enable_performance_testing: Whether to run performance tests.
-        enable_database_validation: Whether to run DB validation.
-        max_concurrent_agents: Max agents running simultaneously.
-    """
-    context: Any = None  # WorkflowContext — Any to avoid circular typing
+    """Input for the Orchestrator Agent."""
+    context: Any = None
     enable_security_testing: bool = True
     enable_performance_testing: bool = False
     enable_database_validation: bool = True
@@ -63,77 +41,87 @@ class OrchestratorInput(AgentInput):
 
 
 class OrchestratorOutput(AgentOutput):
-    """
-    Output from the Orchestrator Agent.
+    """Output from the Orchestrator Agent."""
 
-    Attributes:
-        execution_plan: The ordered list of agents that were/will run.
-        agents_executed: Names of agents that successfully completed.
-        agents_failed: Names of agents that failed.
-        agents_skipped: Names of agents skipped due to failures.
-        total_duration_seconds: Complete workflow duration.
-        release_ready: Orchestrator's assessment (NOT a decision — ADR-009).
-    """
-    execution_plan: list[str] = []
-    agents_executed: list[str] = []
-    agents_failed: list[str] = []
-    agents_skipped: list[str] = []
-    total_duration_seconds: float = 0.0
-    release_ready: bool = False
+    def __init__(self) -> None:
+        super().__init__()
+        self.execution_plan: list[str] = []
+        self.execution_waves: list[list[str]] = []
+        self.agents_executed: list[str] = []
+        self.agents_failed: list[str] = []
+        self.agents_skipped: list[str] = []
+        self.total_duration_seconds: float = 0.0
+        self.release_ready: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        base = super().to_dict()
+        return {
+            **base,
+            "execution_plan": self.execution_plan,
+            "execution_waves": self.execution_waves,
+            "agents_executed": self.agents_executed,
+            "agents_failed": self.agents_failed,
+            "agents_skipped": self.agents_skipped,
+            "total_duration_seconds": self.total_duration_seconds,
+            "release_ready": self.release_ready,
+        }
 
 
 class OrchestratorAgent(BaseAgent):
     """
-    AIQE Orchestrator Agent.
+    Orchestrator Agent — Tier 1, root coordinator.
 
     Controls all agents, plans execution, and coordinates
-    the full workflow lifecycle.
-
-    This agent uses pure deterministic logic — no AI calls.
-    It reads the Agent Registry, resolves the execution order,
-    and delegates execution to the Scheduler through the Engine.
+    the complete workflow lifecycle using deterministic logic.
     """
 
     NAME = "orchestrator"
     DESCRIPTION = (
         "Controls all agents, plans execution order, coordinates "
-        "workflow lifecycle, and ensures the Human Review Gate "
-        "is always the final step."
+        "workflow lifecycle, and enforces the Human Review Gate."
     )
     TIER = 1
-    DEPENDENCIES: list[str] = []  # Root — no dependencies
+    DEPENDENCIES: list[str] = []
 
-    async def run_impl(self, input_data: AgentInput) -> AgentOutput:
-        """
-        Plan and coordinate the workflow execution.
+    def __init__(self, memory_store: Any = None) -> None:
+        self._memory = memory_store
 
-        In the current implementation (Step 6), the Orchestrator
-        builds and returns the execution plan. Full orchestration
-        of other agents happens in Step 15 when all Tier 1 agents
-        exist and the AI Gateway (Step 10) is available.
-
-        Args:
-            input_data: OrchestratorInput with workflow context.
-
-        Returns:
-            OrchestratorOutput with the execution plan.
-        """
-        assert isinstance(input_data, OrchestratorInput), (
-            f"OrchestratorAgent expects OrchestratorInput, "
-            f"got {type(input_data).__name__}"
-        )
-
+    async def run_impl(self, input_data: AgentInput) -> OrchestratorOutput:
+        """Plan and coordinate the workflow execution."""
         output = OrchestratorOutput()
 
         # Build execution plan from registry
-        enabled_agents = agent_registry.get_all_enabled()
-        execution_waves = agent_registry.resolve_execution_order()
+        try:
+            enabled_agents = agent_registry.get_all_enabled()
+            execution_waves = agent_registry.resolve_execution_order()
+        except Exception as e:
+            logger.warning(
+                "orchestrator_registry_empty",
+                error=str(e),
+                workflow_id=input_data.workflow_id,
+            )
+            enabled_agents = []
+            execution_waves = []
 
         execution_plan = []
         for wave in execution_waves:
             execution_plan.extend(wave)
 
         output.execution_plan = execution_plan
+        output.execution_waves = execution_waves
+
+        # Write workflow metadata to shared memory
+        if self._memory:
+            await self._memory.set(
+                key=str(MemoryKeys.WORKFLOW_METADATA),
+                value={
+                    "workflow_id": input_data.workflow_id,
+                    "project_path": input_data.project_path,
+                    "execution_plan": execution_plan,
+                    "total_agents": len(enabled_agents),
+                },
+                written_by=self.NAME,
+            )
 
         logger.info(
             "orchestrator_plan_built",
@@ -146,22 +134,20 @@ class OrchestratorAgent(BaseAgent):
         output.reasoning = (
             f"Orchestrator built execution plan for {len(enabled_agents)} "
             f"agents across {len(execution_waves)} execution waves. "
-            f"Agents will execute in dependency order: {execution_plan}. "
-            f"Dependency failures will be isolated — only the affected "
-            f"dependency chain will be stopped, independent agents will "
-            f"continue executing (ADR-007). "
-            f"Human Review Gate will be enforced as the final step (ADR-009)."
+            f"Execution order: {execution_plan}. "
+            f"Dependency failures will isolate only the affected chain — "
+            f"independent agents will continue (ADR-007). "
+            f"Human Review Gate will be the final step (ADR-009, ADR-010)."
         )
+        output.confidence = 1.0
 
         output.metadata["total_agents"] = len(enabled_agents)
         output.metadata["wave_count"] = len(execution_waves)
         output.metadata["waves"] = execution_waves
-        output.confidence = 1.0  # Deterministic — no uncertainty
 
         return output
 
     def validate_input(self, input_data: AgentInput) -> None:
-        """Orchestrator requires a workflow_id but context is optional at plan time."""
         if not input_data.workflow_id:
             raise ValueError(
                 "OrchestratorAgent requires workflow_id in input."
